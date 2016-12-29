@@ -40,10 +40,18 @@ export class Sling2JCR {
             warn: console.warn
         };
     }
-    
-    private logSuccessResponse(response: any) {
-        response = JSON.parse(response);
-        this.logger.info(`${response['status.code']} ${response['status.message']} : ${response.title}`);
+
+    private logJSONResponse(response: any) {
+        try {
+            if (typeof response === "string") {
+                response = JSON.parse(response);
+            }else if(typeof response === "object"){
+                response = JSON.parse(response.error)
+            }
+            this.logger.info(`${response['status.code']} ${response['status.message']} : ${response.title}`);
+        } catch (error) {
+            this.logger.error(response);
+        }
     }
 
     private async login(server: Server, retry?: boolean): Promise<Server> {
@@ -86,10 +94,10 @@ export class Sling2JCR {
                 return req;
             });
             let responses = await Promise.all(requests);
-            responses.forEach(r => this.logSuccessResponse(r));
+            responses.forEach(r => this.logJSONResponse(r));
             return responses;
         } catch (error) {
-            this.logger.error(error);
+            this.logJSONResponse(error);
         }
     }
 
@@ -117,17 +125,25 @@ export class Sling2JCR {
                                 properties.push({ name: `${path}/${attributeName}@TypeHint`, value: type });
                             }
                         } else { //regular string
-                            properties.push({ name: `${path}/${attributeName}`, value: attributeValue });
-                        }
+                            let isArray = attributeValue.match('^\\[(.*)\\]$');
 
+                            if (isArray) { //matches to an array
+                                let values = isArray[1].split(',');
+                                values.forEach(v => {
+                                    properties.push({ name: `${path}/${attributeName}`, value: v });
+                                });
+                            } else {
+                                properties.push({ name: `${path}/${attributeName}`, value: attributeValue });
+                            }
+                        }
                     }
                 }
             } else if (nodeName !== '_') { // children nodes
-                let childNode = node[nodeName];
+                let childNodes: any[] = node[nodeName];
                 properties.push({ name: `${path}/${nodeName}`, value: '' });
-                for (let childNodeName in childNode) {
-                    properties.push(...this.getPropertiesFromNode(`${path}/${nodeName}`, childNode[childNodeName]));
-                }
+                _.take(childNodes, 1).forEach((c: any) => { // prevent duplicated nodes, only takes the first one 
+                    properties.push(...this.getPropertiesFromNode(`${path}/${nodeName}`, c));
+                });
             }
         }
         return properties;
@@ -135,12 +151,9 @@ export class Sling2JCR {
 
     public async uploadNodes(uploadPath: string, filePath: string, currentNode: string, addDeleteAttribute?: boolean): Promise<any[]> {
         try {
-            //jcr_root\apps\cq\gui\components\authoring\componentbrowser\.content.xml
-            console.log(uploadPath);
             let file = await this.readFileAsync(filePath);
             let fileContent = await this.parseFileToXmlAsync(file);
 
-            // console.log(util.inspect(result, false, null, false));
             let root = fileContent['jcr:root'];
             let properties: Property[] = this.getPropertiesFromNode(`./${currentNode}`, root);
 
@@ -163,21 +176,32 @@ export class Sling2JCR {
             });
             let response = await Promise.all(requests);
 
-            response.forEach(r => this.logSuccessResponse(r));
+            response.forEach(r => this.logJSONResponse(r));
             return response;
         } catch (err) {
-            this.logger.error(err);
+            this.logJSONResponse(err);
         }
     }
 
-    private howToProcessNode(normalizedFilePath: string,
-        jcrPath: string, fileName: string, folderPath: string): ProcessNode | null {
+    private async howToProcessNode(normalizedFilePath: string,
+        jcrPath: string, fileName: string, folderPath: string): Promise<ProcessNode | null> {
         if (fileName === ".content.xml" && _.endsWith(folderPath, "_cq_dialog")) {
             let parts = _.split(jcrPath, "/");
             let uploadPath = parts.slice(0, parts.length - 2).join("/");
             let shouldDelete = fs.readdirSync(folderPath).length < 2;
             return {
                 rootNode: "cq:dialog",
+                uploadPath: uploadPath,
+                filePath: normalizedFilePath,
+                shouldDelete: shouldDelete
+            }
+        }
+        else if (fileName === ".content.xml") {
+            let parts = _.split(jcrPath, "/");
+            let uploadPath = parts.slice(0, parts.length - 2).join("/");
+            let shouldDelete = fs.readdirSync(folderPath).length < 2;
+            return {
+                rootNode: parts[parts.length - 2],
                 uploadPath: uploadPath,
                 filePath: normalizedFilePath,
                 shouldDelete: shouldDelete
@@ -191,13 +215,37 @@ export class Sling2JCR {
                 filePath: normalizedFilePath,
                 shouldDelete: true
             }
+        } else if (fileName === "_rep_policy.xml") {
+            let parts = _.split(jcrPath, "/");
+            let uploadPath = parts.slice(0, parts.length - 1).join("/");
+            return {
+                filePath: normalizedFilePath,
+                uploadPath: uploadPath,
+                rootNode: "rep:policy",
+                shouldDelete: true
+            }
+        } else if (_.endsWith(fileName, ".xml")) {
+            let file = await this.readFileAsync(folderPath + "/" + fileName);
+            let xml = await this.parseFileToXmlAsync(file);
+            let jcr_root = xml['jcr:root'];
+
+            if (jcr_root) {
+                let parts = _.split(jcrPath, "/");
+                let uploadPath = parts.slice(0, parts.length - 1).join("/");
+                return {
+                    filePath: normalizedFilePath,
+                    uploadPath: uploadPath,
+                    rootNode: fileName.substring(0, fileName.lastIndexOf(".")),
+                    shouldDelete: true
+                }
+            }
         } else {
             //upload as file
             return null;
         }
     }
 
-    public process(filePath: string, removeFile: boolean = false): void {
+    public async process(filePath: string, removeFile: boolean = false): Promise<void> {
         if (!filePath.indexOf('jcr_root')) {
             this.logger.info(`File at ${filePath} is not under jcr_root folder`);
             return;
@@ -211,18 +259,20 @@ export class Sling2JCR {
         let fileName = normalizedFilePath.substr(lastSlashIndex + 1);
         let uploadPath = jcrPath.substr(0, jcrPath.lastIndexOf("/"));
 
-        let processNode = this.howToProcessNode(normalizedFilePath, jcrPath, fileName, containingfolder);
+        let processNode = await this.howToProcessNode(normalizedFilePath, jcrPath, fileName, containingfolder);
         if (!removeFile) {
+            this.logger.info(`Modifying ${fileName}.`);
             if (processNode) {
-                this.uploadNodes(processNode.uploadPath, processNode.filePath, processNode.rootNode, processNode.shouldDelete);
+                await this.uploadNodes(processNode.uploadPath, processNode.filePath, processNode.rootNode, processNode.shouldDelete);
             } else {
-                this.uploadFile(uploadPath, fileName, normalizedFilePath);
+                await this.uploadFile(uploadPath, fileName, normalizedFilePath);
             }
         } else {
+            this.logger.info(`Deleting ${fileName}.`);
             if (processNode) {
-                this.removeNodes(processNode.uploadPath, processNode.rootNode);
+                await this.removeNodes(processNode.uploadPath, processNode.rootNode);
             } else {
-                this.removeFile(`${uploadPath}/${fileName}`);
+                await this.removeFile(`${uploadPath}/${fileName}`);
             }
         }
     }
@@ -244,10 +294,10 @@ export class Sling2JCR {
             });
 
             let responses = await Promise.all(requests);
-            responses.forEach(r => this.logSuccessResponse(r));
+            responses.forEach(r => this.logJSONResponse(r));
 
         } catch (error) {
-            this.logger.error(error);
+            this.logJSONResponse(error);
         }
     }
 
@@ -267,11 +317,10 @@ export class Sling2JCR {
             });
 
             let responses = await Promise.all(requests);
-            console.log(responses);
-            responses.forEach(r =>this.logger.info(`Deleted file : ${jcrPath}`));
+            responses.forEach(r => this.logger.info(`Deleted file : ${jcrPath}`));
 
         } catch (error) {
-            this.logger.error(error);
+            this.logJSONResponse(error);
         }
     }
 
