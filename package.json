@@ -1,6 +1,6 @@
 {
   "name": "sling2jcr",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "This library takes files and uploads its content to a configured JCR respository using Sling Post.",
   "main": "lib/sling2jcr.js",
   "dependencies": {
