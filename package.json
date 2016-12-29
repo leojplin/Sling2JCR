@@ -1,0 +1,24 @@
+{
+  "name": "sling2jcr",
+  "version": "1.0.1",
+  "description": "This library takes files and uploads its content to a configured JCR respository using Sling Post.",
+  "main": "lib/sling2jcr.js",
+  "dependencies": {
+    "lodash": "^4.17.3",
+    "node-watch": "^0.4.1",
+    "request": "^2.79.0",
+    "request-promise": "^4.1.1",
+    "typescript": "^2.2.0-dev.20161209",
+    "xml2js": "^0.4.17"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Leo Jiapei Lin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leoxy520/Sling2JCR"
+  }
+}
