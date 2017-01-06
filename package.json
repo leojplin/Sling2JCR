@@ -3,6 +3,9 @@
   "version": "1.0.2",
   "description": "This library takes files and uploads its content to a configured JCR respository using Sling Post.",
   "main": "lib/sling2jcr.js",
+  "bin": {
+    "sling2jcr": "./index.js"
+  },
   "dependencies": {
     "lodash": "^4.17.3",
     "node-watch": "^0.4.1",

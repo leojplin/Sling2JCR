@@ -30,7 +30,7 @@ var lib = new sling2jcr.Sling2JCR(config.servers);
 //watch the files under the jcr_root folder, or any sub directory under it. Files not under a sub directory of jcr_root won't be synchronized.
 watch(config.jcr_root, function (filePath) {
     if (fs.existsSync(filePath)) { // Since "deleted" event is also emitted as a "change" event due to API limitation, check if the file exist first. 
-        if (fs.statSync(filePath).isFile()) { // Te directory of the changed file is also emitted as an event, check for the file only.
+        if (fs.statSync(filePath).isFile()) { // The directory of the changed file is also emitted as an event, check for the file only.
             lib.process(filePath);
         }
     }
