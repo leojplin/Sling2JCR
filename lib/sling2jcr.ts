@@ -38,7 +38,7 @@ export class Sling2JCR {
         };
     }
 
-    private async loginSingle(server: Server, retry?: boolean): Promise<Server> {
+    private async loginSingle(server: Server): Promise<Server> {
         return new Promise<Server>((resolve, reject) => {
             var form = `j_username=${server.username}&j_password=${server.password}&j_workspace=crx.default&j_validate=true&_charset_=utf-8`;
             Request.post({
@@ -49,7 +49,7 @@ export class Sling2JCR {
             }).then(response => {
                 let cookie = response.headers['set-cookie'][0];
                 server.cookie = cookie;
-                this.logger.info(`Cookie for server: ${server.host} is ${cookie}`);
+                this.logger.info(`Logged in for: ${server.host}`);
                 resolve(server);
             }).catch(error => {
                 this.logger.error(error);
@@ -63,7 +63,7 @@ export class Sling2JCR {
     }
 
     public async process(filePath: string, removeFile: boolean = false): Promise<void> {
-        if (!filePath.indexOf('jcr_root')) {
+        if (filePath.indexOf('jcr_root') < 0) {
             this.logger.info(`File at ${filePath} is not under jcr_root folder`);
             return;
         }
@@ -169,12 +169,13 @@ export class Sling2JCR {
 
     private async getNodeStrategy(path: Path.ParsedPath): Promise<NodeStrategy | null> {
         let fileName = `${path.name}${path.ext}`;
-        let jcrPath = path.dir.substr(path.dir.lastIndexOf('jcr_root') + 'jcr_root'.length + 1);
         let filePath = `${path.dir}${Path.sep}${path.base}`;
+        let jcrPath = path.dir.substr(path.dir.lastIndexOf('jcr_root') + 'jcr_root'.length + 1);
         let pathSegements = _.split(jcrPath, Path.sep);
+        
         if (fileName === ".content.xml" && _.endsWith(path.dir, "_cq_dialog")) {
-            let uploadPath = pathSegements.slice(0, pathSegements.length - 1).join("/");
             let shouldDelete = fs.readdirSync(path.dir).length < 2;
+            let uploadPath = pathSegements.slice(0, pathSegements.length - 1).join("/");
             return {
                 rootNode: "cq:dialog",
                 uploadPath: uploadPath,
@@ -191,16 +192,8 @@ export class Sling2JCR {
                 filePath: filePath,
                 shouldDelete: shouldDelete
             }
-        } else if (fileName === "dialog.xml") {
-            let uploadPath = pathSegements.slice(0, pathSegements.length - 1).join("/");
-            return {
-                rootNode: "dialog",
-                uploadPath: uploadPath,
-                filePath: filePath,
-                shouldDelete: true
-            }
         } else if (fileName === "_rep_policy.xml") {
-            let uploadPath = pathSegements.slice(0, pathSegements.length - 1).join("/");
+            let uploadPath = pathSegements.slice(0, pathSegements.length).join("/");
             return {
                 filePath: filePath,
                 uploadPath: uploadPath,
@@ -208,12 +201,11 @@ export class Sling2JCR {
                 shouldDelete: true
             }
         } else if (_.endsWith(fileName, ".xml")) {
+            let uploadPath = pathSegements.slice(0, pathSegements.length).join("/");
             let file = await this.readFileAsync(filePath);
             let xml = await this.parseFileToXmlAsync(file);
             let jcr_root = xml['jcr:root'];
-
             if (jcr_root) {
-                let uploadPath = pathSegements.slice(0, pathSegements.length - 1).join("/");
                 return {
                     filePath: filePath,
                     uploadPath: uploadPath,
@@ -221,10 +213,8 @@ export class Sling2JCR {
                     shouldDelete: true
                 }
             }
-        } else {
-            //upload as file
-            return null;
         }
+        return null;
     }
 
     private async uploadFile(path: Path.ParsedPath) {
